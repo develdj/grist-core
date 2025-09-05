@@ -27,10 +27,8 @@ RUN useradd -ms /bin/bash grist && \
     mkdir -p /persist/docs && \
     chown -R grist:grist /persist
 
-# Build in /app instead of /grist to avoid volume conflicts
+# Build in /app
 WORKDIR /app
-
-# Copy and build
 COPY . /app
 
 RUN yarn install --frozen-lockfile --network-timeout 600000 && \
@@ -39,11 +37,43 @@ RUN yarn install --frozen-lockfile --network-timeout 600000 && \
     ls -la /app/_build/app/server/ && \
     chown -R grist:grist /app
 
-# Create startup script
-RUN echo '#!/bin/bash' > /start.sh && \
-    echo 'cd /app' >> /start.sh && \
-    echo 'exec node _build/app/server/devServerMain.js' >> /start.sh && \
-    chmod +x /start.sh
+# Create comprehensive startup script
+RUN cat > /start.sh << 'EOF'
+#!/bin/bash
+echo "Starting Grist server..."
+echo "Working directory: $(pwd)"
+echo "Checking /app contents:"
+ls -la /app/ | head -20
+echo "Checking /app/_build:"
+if [ -d /app/_build ]; then
+    echo "_build exists"
+    ls -la /app/_build/app/server/ 2>/dev/null || echo "No server directory"
+else
+    echo "_build MISSING!"
+fi
+
+cd /app
+
+# Try different possible entry points
+if [ -f "_build/app/server/devServerMain.js" ]; then
+    echo "Starting devServerMain.js..."
+    exec node _build/app/server/devServerMain.js
+elif [ -f "_build/app/server/MergedServer.js" ]; then
+    echo "Starting MergedServer.js..."
+    exec node _build/app/server/MergedServer.js
+elif [ -f "sandbox/grist/main.py" ]; then
+    echo "Trying Python entry point..."
+    exec python3 sandbox/grist/main.py
+else
+    echo "ERROR: No entry point found!"
+    echo "Available JS files:"
+    find /app -name "*.js" -type f | grep -E "(main|server|start)" | head -20
+    # Keep container alive for debugging
+    tail -f /dev/null
+fi
+EOF
+
+RUN chmod +x /start.sh && chown grist:grist /start.sh
 
 USER grist
 
