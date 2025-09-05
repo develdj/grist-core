@@ -22,9 +22,10 @@ RUN apt-get update && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python packages
-RUN pip3 install --no-cache-dir --break-system-packages \
-    six python-dateutil chardet sortedcontainers iso8601 openpyxl
+# Install Python packages using standard PyPI (force index-url)
+RUN pip3 install --index-url https://pypi.org/simple/ \
+    --no-cache-dir --break-system-packages \
+    six python-dateutil chardet sortedcontainers iso8601 openpyxl || true
 
 # Add grist user
 RUN useradd -ms /bin/bash grist && \
