@@ -21,6 +21,10 @@ services:
       - TF_FORCE_GPU_ALLOW_GROWTH=true
       - GRIST_HOST=0.0.0.0
       - GRIST_PORT=8484
+      - APP_HOME_URL=https://foglio.cumio.site
+      - GRIST_FORCE_LOGIN=false
+      - GRIST_SUPPORT_ANON=true
+      - APP_DOC_URL=https://foglio.cumio.site
     networks:
       - grist-network
     restart: unless-stopped
