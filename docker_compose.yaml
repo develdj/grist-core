@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  grist:
+    build:
+      context: ./grist-core
+      dockerfile: Dockerfile.jetson  # Save the above Dockerfile as this
+      platforms:
+        - linux/arm64
+    image: grist-jetson:latest
+    runtime: nvidia  # Enable GPU access if needed
+    volumes:
+      - ${PERSIST_DIR:-./persist}/grist:/persist
+      - static-content:/grist/static-publish
+    ports:
+      - 8484:8484
+    environment:
+      - GRIST_DEFAULT_EMAIL=${GRIST_DEFAULT_EMAIL:-admin@example.com}
+      - GRIST_SINGLE_ORG=${GRIST_SINGLE_ORG:-docs}
+      - GRIST_STATIC_DIR=/grist/static-publish
+      # Jetson-specific optimizations
+      - CUDA_VISIBLE_DEVICES=0  # If you want to use GPU
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  grist-static:
+    build:
+      context: ./grist-static
+      dockerfile: Dockerfile
+      platforms:
+        - linux/arm64
+    image: grist-static-arm64:latest
+    volumes:
+      - static-content:/app/static
+      - ${PERSIST_DIR:-./persist}/static:/app/persist
+    ports:
+      - 8485:80
+    environment:
+      - GRIST_API_URL=http://grist:8484
+      - STATIC_PUBLISH_PATH=/app/static
+    depends_on:
+      - grist
+    restart: unless-stopped
+
+volumes:
+  static-content:
+    driver: local
