@@ -109,6 +109,12 @@ RUN chmod +x /grist/sandbox/docker_entrypoint.sh && \
     chmod +x /grist/sandbox/supervisor.mjs && \
     ls -la /grist/sandbox/
 
+# Create a simple startup script
+RUN echo '#!/bin/bash' > /startup.sh && \
+    echo 'cd /grist' >> /startup.sh && \
+    echo 'exec /grist/sandbox/docker_entrypoint.sh "$@"' >> /startup.sh && \
+    chmod +x /startup.sh
+
 # Create user
 RUN useradd -ms /bin/bash grist
 
@@ -133,6 +139,6 @@ ENV \
 
 EXPOSE 8484
 
-# Use relative path since WORKDIR is /grist
-ENTRYPOINT ["./sandbox/docker_entrypoint.sh"]
+# Use absolute path
+ENTRYPOINT ["/startup.sh"]
 CMD ["node", "./sandbox/supervisor.mjs"]
