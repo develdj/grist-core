@@ -50,7 +50,6 @@ FROM dustynv/cuda-python:r36.4.0-cu128-24.04
 ARG GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING=false
 
 # Install Node.js 22 and other required packages
-# Since this is Ubuntu 24.04 based, we can use NodeSource repository
 RUN apt-get update && \
     apt-get install -y ca-certificates curl gnupg && \
     mkdir -p /etc/apt/keyrings && \
@@ -69,9 +68,28 @@ RUN apt-get update && \
 # Verify Node installation
 RUN node --version && npm --version
 
-# Install Python packages for Grist (Python is already optimized in base image)
+# Install Python packages for Grist
+# First, check what Python and pip are available
+RUN python3 --version && \
+    (pip3 --version || pip --version || python3 -m pip --version)
+
+# Copy requirements and install with better error handling
 COPY sandbox/requirements.txt /tmp/requirements.txt
-RUN pip3 install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# Install Python packages with fallback options
+RUN set -e; \
+    if command -v pip3 >/dev/null 2>&1; then \
+        pip3 install --no-cache-dir -r /tmp/requirements.txt || \
+        pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt || \
+        python3 -m pip install --no-cache-dir -r /tmp/requirements.txt; \
+    elif command -v pip >/dev/null 2>&1; then \
+        pip install --no-cache-dir -r /tmp/requirements.txt || \
+        pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt; \
+    else \
+        python3 -m pip install --no-cache-dir -r /tmp/requirements.txt || \
+        python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt; \
+    fi; \
+    rm /tmp/requirements.txt
 
 # Create persist directory
 RUN mkdir -p /persist/docs
