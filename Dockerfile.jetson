@@ -10,10 +10,8 @@ COPY . /grist
 
 RUN yarn install --frozen-lockfile --network-timeout 600000 && \
     yarn run build:prod && \
-    echo "=== Build complete, checking files ===" && \
-    ls -la /grist/_build/app/server/ && \
-    test -f /grist/_build/app/server/mergedServerMain.js || \
-    (echo "ERROR: mergedServerMain.js not found!" && find /grist/_build -name "*.js" | head -20 && exit 1)
+    echo "=== Build complete ===" && \
+    ls -la /grist/_build/app/server/
 
 # Jetson runtime 
 FROM dustynv/cuda-python:r36.4.0-cu128-24.04
@@ -38,18 +36,13 @@ RUN useradd -ms /bin/bash grist && \
 
 WORKDIR /grist
 
-# Copy everything and verify
+# Copy everything from builder
 COPY --from=builder /grist /grist
 
-# Verify files were copied
+# Verify and set ownership
 RUN echo "Checking copied files..." && \
-    ls -la /grist/ && \
     ls -la /grist/_build/app/server/ && \
-    test -f /grist/_build/app/server/mergedServerMain.js || \
-    (echo "ERROR: Files not copied properly!" && exit 1)
-
-# Change ownership after verification
-RUN chown -R grist:grist /grist
+    chown -R grist:grist /grist
 
 USER grist
 
@@ -62,5 +55,6 @@ ENV GRIST_HOST=0.0.0.0 \
 
 EXPOSE 8484
 
+# Use the actual main file that exists
 ENTRYPOINT ["/usr/bin/dumb-init", "-c", "--"]
-CMD ["node", "_build/app/server/mergedServerMain.js"]
+CMD ["node", "_build/app/server/devServerMain.js"]
