@@ -43,7 +43,7 @@ services:
     ports:
       - 8485:80
     environment:
-      - GRIST_API_URL=http://grist:8484
+      - GRIST_API_URL=https://foglio.cumio.site:8484
       - STATIC_PUBLISH_PATH=/app/static
     depends_on:
       - grist
