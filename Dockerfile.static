@@ -1,81 +1,63 @@
-# Dockerfile.static - Robust version
-FROM node:22-alpine AS builder
-
-# Install required build tools
-RUN apk add --no-cache git make python3 g++ gcc
-
-# Clone and build grist-static
-RUN git clone https://github.com/develdj/grist-static.git /app
-WORKDIR /app
-
-# Debug: Show repository contents
-RUN echo "Repository contents:" && ls -la
-
-# Install dependencies and build
-RUN if [ -f "package.json" ]; then \
-        echo "Found package.json, installing dependencies..." && \
-        npm install; \
-    else \
-        echo "No package.json found"; \
-    fi
-
-RUN if [ -f "Makefile" ]; then \
-        echo "Found Makefile, running build..." && \
-        make requirements || true && \
-        make build || true && \
-        make package || true; \
-    elif [ -f "package.json" ] && grep -q "\"build\"" package.json; then \
-        echo "Running npm build script..." && \
-        npm run build || true; \
-    else \
-        echo "No build process found"; \
-    fi
-
-# Create a staging directory with all potential output
-RUN mkdir -p /output && \
-    (cp -r dist/* /output/ 2>/dev/null || true) && \
-    (cp -r public/* /output/ 2>/dev/null || true) && \
-    (cp -r build/* /output/ 2>/dev/null || true) && \
-    (cp -r out/* /output/ 2>/dev/null || true) && \
-    (cp *.html /output/ 2>/dev/null || true) && \
-    (cp *.js /output/ 2>/dev/null || true) && \
-    (cp *.css /output/ 2>/dev/null || true) && \
-    (cp -r static/* /output/ 2>/dev/null || true)
-
-# If output is still empty, copy everything
-RUN if [ -z "$(ls -A /output)" ]; then \
-        echo "No built files found, copying entire repository..." && \
-        cp -r /app/* /output/; \
-    fi
-
-# Production stage
 FROM nginx:alpine
 
-# Copy the output
-COPY --from=builder /output /usr/share/nginx/html
+# Create a simple index.html directly
+RUN cat > /usr/share/nginx/html/index.html <<'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grist Public Tables</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #333; }
+        .status { padding: 10px; background: #f0f0f0; margin: 20px 0; }
+        iframe { width: 100%; height: 600px; border: 1px solid #ccc; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>Grist Public Tables</h1>
+    <div class="status">
+        <p>This page can display public Grist tables.</p>
+        <p>Grist API endpoint: <a href="/api/">/api/</a></p>
+    </div>
+    
+    <!-- Add your Grist embed URLs here -->
+    <div id="content">
+        <p>To embed a Grist table:</p>
+        <ol>
+            <li>Open your Grist document at <a href="http://foglio.cumio.site:8484">http://foglio.cumio.site:8484</a></li>
+            <li>Click Share → Publish to web</li>
+            <li>Copy the embed code</li>
+            <li>Add it to this page</li>
+        </ol>
+    </div>
+</body>
+</html>
+EOF
 
-# Create a simple nginx config
-RUN cat > /etc/nginx/conf.d/default.conf <<EOF
+# Update nginx config to proxy to Grist
+RUN cat > /etc/nginx/conf.d/default.conf <<'EOF'
 server {
     listen 80;
     server_name _;
     root /usr/share/nginx/html;
-    index index.html index.htm;
+    index index.html;
     
     location / {
-        try_files \$uri \$uri/ /index.html =404;
+        try_files $uri $uri/ /index.html;
     }
     
     location /api/ {
         proxy_pass http://grist:8484/;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 EOF
