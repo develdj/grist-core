@@ -12,6 +12,8 @@ services:
     container_name: grist-server
     volumes:
       - ${PERSIST_DIR:-./persist}/grist:/persist
+    ports:
+      - "8484:8484"  # Expose Grist directly
     environment:
       - GRIST_DEFAULT_EMAIL=${GRIST_DEFAULT_EMAIL:-admin@example.com}
       - GRIST_SINGLE_ORG=${GRIST_SINGLE_ORG:-docs}
@@ -22,32 +24,6 @@ services:
     networks:
       - grist-network
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8484/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  grist-static:
-    build:
-      context: .
-      dockerfile: Dockerfile.static
-      platforms:
-        - linux/arm64
-    image: grist-static:latest
-    container_name: grist-static
-    ports:
-      - "8080:80"     # Changed from 80:80 to 8080:80
-    depends_on:
-      - grist
-    networks:
-      - grist-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
 volumes:
   persist:
