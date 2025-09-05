@@ -2,7 +2,7 @@ version: '3.8'
 services:
   grist:
     build:
-      context: .  # Changed from ./grist-core to . (current directory)
+      context: .
       dockerfile: Dockerfile.jetson
       platforms:
         - linux/arm64
@@ -10,50 +10,19 @@ services:
     runtime: nvidia
     volumes:
       - ${PERSIST_DIR:-./persist}/grist:/persist
-      - static-content:/grist/static-publish
     ports:
       - 8484:8484
     environment:
       - GRIST_DEFAULT_EMAIL=${GRIST_DEFAULT_EMAIL:-admin@example.com}
       - GRIST_SINGLE_ORG=${GRIST_SINGLE_ORG:-docs}
-      - GRIST_STATIC_DIR=/grist/static-publish
       - CUDA_VISIBLE_DEVICES=0
       - TF_FORCE_GPU_ALLOW_GROWTH=true
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     restart: unless-stopped
-    networks:
-      - grist-network
-
-  grist-static:
-    build:
-      context: .  # Changed to use current directory
-      dockerfile: Dockerfile.static  # Create this new file
-      platforms:
-        - linux/arm64
-    image: grist-static-arm64:latest
-    volumes:
-      - static-content:/app/static
-      - ${PERSIST_DIR:-./persist}/static:/app/persist
-    ports:
-      - 8485:80
-    environment:
-      - GRIST_API_URL=http://grist:8484  # Changed to internal URL
-      - STATIC_PUBLISH_PATH=/app/static
-    depends_on:
-      - grist
-    restart: unless-stopped
-    networks:
-      - grist-network
 
 volumes:
-  static-content:
+  persist:
     driver: local
+
 
 networks:
   grist-network:
