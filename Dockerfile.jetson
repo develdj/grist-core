@@ -9,6 +9,7 @@ RUN apt-get update && \
         libsqlite3-0 \
         build-essential \
         python3 \
+        python3-pip \
         make \
         g++ \
         git && \
@@ -17,10 +18,19 @@ RUN apt-get update && \
     npm install -g yarn && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python packages INCLUDING asttokens
+# Install ALL Python packages needed for Grist sandbox
 RUN pip3 install --index-url https://pypi.org/simple/ \
     --no-cache-dir --break-system-packages \
-    six python-dateutil chardet sortedcontainers iso8601 openpyxl asttokens || true
+    six \
+    python-dateutil \
+    chardet \
+    sortedcontainers \
+    iso8601 \
+    openpyxl \
+    asttokens \
+    astroid \
+    lazy_object_proxy \
+    wrapt
 
 # Create user
 RUN useradd -ms /bin/bash grist && \
@@ -35,26 +45,13 @@ RUN yarn install --frozen-lockfile --network-timeout 600000 && \
     yarn run build:prod && \
     chown -R grist:grist /app
 
-# Create proper startup script with NODE_PATH
+# Create startup script
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
 cd /app
-
-# Set NODE_PATH to help resolve modules
 export NODE_PATH=/app/_build:/app/node_modules:$NODE_PATH
-
-# Use the main entry point from package.json
-if [ -f "_build/app/server/lib/main.js" ]; then
-    echo "Starting with main.js..."
-    exec node _build/app/server/lib/main.js
-elif [ -f "sandbox/gristServer.js" ]; then
-    echo "Starting with gristServer.js..."
-    exec node sandbox/gristServer.js
-else
-    # Fall back to running the npm start command
-    echo "Starting with yarn start..."
-    exec yarn start
-fi
+echo "Starting with yarn start..."
+exec yarn start
 EOF
 
 RUN chmod +x /start.sh
