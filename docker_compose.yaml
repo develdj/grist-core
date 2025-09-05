@@ -1,14 +1,13 @@
 version: '3.8'
-
 services:
   grist:
     build:
-      context: ./grist-core
-      dockerfile: Dockerfile.jetson  # Save the above Dockerfile as this
+      context: .  # Changed from ./grist-core to . (current directory)
+      dockerfile: Dockerfile.jetson
       platforms:
         - linux/arm64
     image: grist-jetson:latest
-    runtime: nvidia  # Enable GPU access if needed
+    runtime: nvidia
     volumes:
       - ${PERSIST_DIR:-./persist}/grist:/persist
       - static-content:/grist/static-publish
@@ -18,8 +17,7 @@ services:
       - GRIST_DEFAULT_EMAIL=${GRIST_DEFAULT_EMAIL:-admin@example.com}
       - GRIST_SINGLE_ORG=${GRIST_SINGLE_ORG:-docs}
       - GRIST_STATIC_DIR=/grist/static-publish
-      # Jetson-specific optimizations
-      - CUDA_VISIBLE_DEVICES=0  # If you want to use GPU
+      - CUDA_VISIBLE_DEVICES=0
       - TF_FORCE_GPU_ALLOW_GROWTH=true
     deploy:
       resources:
@@ -29,11 +27,13 @@ services:
               count: all
               capabilities: [gpu]
     restart: unless-stopped
+    networks:
+      - grist-network
 
   grist-static:
     build:
-      context: ./grist-static
-      dockerfile: Dockerfile
+      context: .  # Changed to use current directory
+      dockerfile: Dockerfile.static  # Create this new file
       platforms:
         - linux/arm64
     image: grist-static-arm64:latest
@@ -43,12 +43,18 @@ services:
     ports:
       - 8485:80
     environment:
-      - GRIST_API_URL=https://foglio.cumio.site:8484
+      - GRIST_API_URL=http://grist:8484  # Changed to internal URL
       - STATIC_PUBLISH_PATH=/app/static
     depends_on:
       - grist
     restart: unless-stopped
+    networks:
+      - grist-network
 
 volumes:
   static-content:
     driver: local
+
+networks:
+  grist-network:
+    driver: bridge
