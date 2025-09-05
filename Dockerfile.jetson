@@ -27,40 +27,23 @@ RUN useradd -ms /bin/bash grist && \
     mkdir -p /persist/docs && \
     chown -R grist:grist /persist
 
-WORKDIR /grist
+# Build in /app instead of /grist to avoid volume conflicts
+WORKDIR /app
 
 # Copy and build
-COPY . /grist
+COPY . /app
 
 RUN yarn install --frozen-lockfile --network-timeout 600000 && \
     yarn run build:prod && \
-    echo "=== After build ===" && \
-    ls -la /grist/ && \
-    echo "=== _build contents ===" && \
-    find /grist/_build -type f -name "*.js" | head -20 && \
-    echo "=== Creating debug script ===" && \
-    echo '#!/bin/bash' > /start.sh && \
-    echo 'echo "Container starting..."' >> /start.sh && \
-    echo 'echo "Current directory: $(pwd)"' >> /start.sh && \
-    echo 'echo "Contents of /grist:"' >> /start.sh && \
-    echo 'ls -la /grist/' >> /start.sh && \
-    echo 'echo "Contents of /grist/_build (if exists):"' >> /start.sh && \
-    echo 'if [ -d /grist/_build ]; then' >> /start.sh && \
-    echo '  find /grist/_build -type f -name "*.js" | head -10' >> /start.sh && \
-    echo 'else' >> /start.sh && \
-    echo '  echo "_build directory does not exist!"' >> /start.sh && \
-    echo 'fi' >> /start.sh && \
-    echo 'echo "Trying to start with available main file..."' >> /start.sh && \
-    echo 'if [ -f /grist/_build/app/server/devServerMain.js ]; then' >> /start.sh && \
-    echo '  exec node /grist/_build/app/server/devServerMain.js' >> /start.sh && \
-    echo 'elif [ -f /grist/_build/app/server/MergedServer.js ]; then' >> /start.sh && \
-    echo '  exec node /grist/_build/app/server/MergedServer.js' >> /start.sh && \
-    echo 'else' >> /start.sh && \
-    echo '  echo "No known server file found!"' >> /start.sh && \
-    echo '  sleep 10' >> /start.sh && \
-    echo 'fi' >> /start.sh && \
-    chmod +x /start.sh && \
-    chown -R grist:grist /grist
+    echo "=== Build complete ===" && \
+    ls -la /app/_build/app/server/ && \
+    chown -R grist:grist /app
+
+# Create startup script
+RUN echo '#!/bin/bash' > /start.sh && \
+    echo 'cd /app' >> /start.sh && \
+    echo 'exec node _build/app/server/devServerMain.js' >> /start.sh && \
+    chmod +x /start.sh
 
 USER grist
 
@@ -73,4 +56,5 @@ ENV GRIST_HOST=0.0.0.0 \
 
 EXPOSE 8484
 
+WORKDIR /app
 CMD ["/start.sh"]
