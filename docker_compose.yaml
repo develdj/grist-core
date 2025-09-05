@@ -37,8 +37,7 @@ services:
     image: grist-static:latest
     container_name: grist-static
     ports:
-      - "80:80"      # Public web interface
-      - "8484:8484"  # Grist API access (if needed externally)
+      - "8080:80"     # Changed from 80:80 to 8080:80
     depends_on:
       - grist
     networks:
