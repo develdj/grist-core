@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grist Public Tables</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #333; }
+        #status { padding: 10px; background: #f0f0f0; margin: 20px 0; }
+        iframe { width: 100%; height: 600px; border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <h1>Grist Public Tables</h1>
+    <div id="status">Checking Grist API connection...</div>
+    
+    <!-- Embed a Grist form or view -->
+    <iframe id="gristFrame" src="" style="display:none;"></iframe>
+    
+    <script>
+        // Check API connection
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('status').innerHTML = 
+                    '✅ Connected to Grist API<br>' +
+                    'To embed a public table:<br>' +
+                    '1. Open your Grist document<br>' +
+                    '2. Share it publicly<br>' + 
+                    '3. Copy the embed link<br>' +
+                    '4. Update this page with your embed URL';
+            })
+            .catch(error => {
+                document.getElementById('status').innerHTML = 
+                    '❌ API connection failed: ' + error;
+            });
+            
+        // Example: If you have a public Grist document, set its embed URL here
+        // document.getElementById('gristFrame').src = 'http://foglio.cumio.site:8484/o/docs/...';
+    </script>
+</body>
+</html>
