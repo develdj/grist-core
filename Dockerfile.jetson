@@ -2,20 +2,17 @@ FROM node:22-bookworm AS builder
 
 WORKDIR /grist
 
-# FIRST: Copy package files for dependency installation
+# Copy package files
 COPY package.json yarn.lock /grist/
 
 # Install dependencies
 RUN yarn install --frozen-lockfile --network-timeout 600000
 
-# THEN: Copy all source files
+# Copy all source files
 COPY . /grist/
 
 # Build the production app
-RUN yarn run build:prod || \
-    (echo "Build failed, trying alternative..." && \
-     npm run build:prod) || \
-    echo "Build step skipped"
+RUN yarn run build:prod
 
 FROM dustynv/cuda-python:r36.4.0-cu128-24.04
 
@@ -42,25 +39,31 @@ COPY --from=builder /grist /grist
 
 WORKDIR /grist
 
-# Create a simple startup script that tries multiple entry points
+# Create a debugging startup script
 RUN echo '#!/bin/bash' > /start.sh && \
-    echo 'cd /grist' >> /start.sh && \
+    echo 'set -e' >> /start.sh && \
     echo '' >> /start.sh && \
-    echo '# Try different entry points' >> /start.sh && \
+    echo 'echo "Starting Grist..."' >> /start.sh && \
+    echo 'echo "Current directory: $(pwd)"' >> /start.sh && \
+    echo 'echo "Listing /grist contents:"' >> /start.sh && \
+    echo 'ls -la /grist/' >> /start.sh && \
+    echo '' >> /start.sh && \
+    echo '# Check for common entry points' >> /start.sh && \
     echo 'if [ -f "_build/app/server/mergedServerMain.js" ]; then' >> /start.sh && \
-    echo '  echo "Starting from _build/app/server/mergedServerMain.js"' >> /start.sh && \
+    echo '  echo "Found _build/app/server/mergedServerMain.js"' >> /start.sh && \
     echo '  exec node _build/app/server/mergedServerMain.js' >> /start.sh && \
-    echo 'elif [ -f "app/server/mergedServerMain.js" ]; then' >> /start.sh && \
-    echo '  echo "Starting from app/server/mergedServerMain.js"' >> /start.sh && \
-    echo '  exec node app/server/mergedServerMain.js' >> /start.sh && \
-    echo 'elif [ -f "_build/app/server/server.js" ]; then' >> /start.sh && \
-    echo '  echo "Starting from _build/app/server/server.js"' >> /start.sh && \
-    echo '  exec node _build/app/server/server.js' >> /start.sh && \
+    echo 'elif [ -f "_build/app/server/lib/main.js" ]; then' >> /start.sh && \
+    echo '  echo "Found _build/app/server/lib/main.js"' >> /start.sh && \
+    echo '  exec node _build/app/server/lib/main.js' >> /start.sh && \
+    echo 'elif [ -d "_build" ]; then' >> /start.sh && \
+    echo '  echo "Found _build directory, searching for main files..."' >> /start.sh && \
+    echo '  find _build -name "*.js" -path "*/server/*" | head -20' >> /start.sh && \
+    echo '  echo "Trying to start from _build/app/server/lib/main.js"' >> /start.sh && \
+    echo '  exec node _build/app/server/lib/main.js' >> /start.sh && \
     echo 'else' >> /start.sh && \
-    echo '  echo "No server entry point found, listing directory:"' >> /start.sh && \
-    echo '  ls -la /grist/' >> /start.sh && \
-    echo '  ls -la /grist/_build/' || true >> /start.sh && \
-    echo '  ls -la /grist/app/' || true >> /start.sh && \
+    echo '  echo "ERROR: No entry point found!"' >> /start.sh && \
+    echo '  echo "Directory structure:"' >> /start.sh && \
+    echo '  find /grist -type d -maxdepth 3' >> /start.sh && \
     echo '  exit 1' >> /start.sh && \
     echo 'fi' >> /start.sh && \
     chmod +x /start.sh
