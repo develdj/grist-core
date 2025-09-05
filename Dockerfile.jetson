@@ -22,22 +22,14 @@ RUN \
  cd /grist/ext && \
  { if [ -e package.json ] ; then yarn install --frozen-lockfile --modules-folder=/node_modules --verbose --network-timeout 600000 ; fi }
 
-# Build node code
-COPY tsconfig.json /grist
-COPY tsconfig-ext.json /grist
-COPY tsconfig-prod.json /grist
-COPY test/tsconfig.json /grist/test/tsconfig.json
-COPY test/chai-as-promised.js /grist/test/chai-as-promised.js
-COPY app /grist/app
-COPY stubs /grist/stubs
-COPY buildtools /grist/buildtools
-COPY static/locales /grist/static/locales
+# Copy ALL source files including sandbox
+COPY . /grist/
 
-RUN WEBPACK_EXTRA_MODULE_PATHS=/node_modules yarn run build:prod
+# Build node code
+RUN cd /grist && WEBPACK_EXTRA_MODULE_PATHS=/node_modules yarn run build:prod
 RUN rm -rf /grist/static/locales
 
-# Copy sandbox files for pyodide
-COPY sandbox /grist/sandbox
+# Setup pyodide
 RUN cd /grist/sandbox/pyodide && make setup || echo "Pyodide setup skipped for ARM64"
 
 ################################################################################
@@ -63,60 +55,30 @@ RUN apt-get update && \
         build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
-COPY sandbox/requirements.txt /tmp/requirements.txt
-
-# Install Python packages with better fallback strategy
+# Install minimal Python packages
 RUN python3 -m pip install --upgrade pip && \
-    echo "Installing Python packages..." && \
-    timeout 300 python3 -m pip install --no-cache-dir --break-system-packages \
-        --index-url https://pypi.org/simple \
-        --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu129 \
-        -r /tmp/requirements.txt 2>/dev/null || \
-    (echo "Fallback: Installing essential packages only..." && \
-     python3 -m pip install --no-cache-dir --break-system-packages \
+    python3 -m pip install --no-cache-dir --break-system-packages \
         six python-dateutil chardet sortedcontainers iso8601 2>/dev/null || \
-     echo "Warning: Some Python packages not installed") && \
-    rm -f /tmp/requirements.txt
+    echo "Warning: Some Python packages not installed"
 
 # Create directory structure
 RUN mkdir -p /persist/docs /grist
 
-# Copy all Grist files first
+# Copy everything from builder
 COPY --from=builder /grist /grist
-
-# Copy built assets (overwrites source files with built versions)
 COPY --from=builder /node_modules /node_modules
-COPY --from=builder /grist/node_modules_prod /grist/node_modules
-COPY --from=builder /grist/_build /grist/_build
-COPY --from=builder /grist/static /grist/static-built
 
-# Copy application files
-COPY package.json /grist/package.json
-COPY bower_components /grist/bower_components
-COPY plugins /grist/plugins
-COPY static /grist/static
+# Create grist user and set permissions
+RUN useradd -ms /bin/bash grist && \
+    chown -R grist:grist /persist && \
+    chown -R grist:grist /grist
 
-# Merge static files
-RUN if [ -d /grist/static-built ]; then \
-      cp -rf /grist/static-built/* /grist/static/ && \
-      rm -rf /grist/static-built; \
-    fi
-
-# Ensure sandbox files are in place and executable
-COPY sandbox /grist/sandbox
-RUN chmod +x /grist/sandbox/docker_entrypoint.sh && \
-    chmod +x /grist/sandbox/supervisor.mjs && \
-    ls -la /grist/sandbox/
-
-# Create a simple startup script
-RUN echo '#!/bin/bash' > /startup.sh && \
-    echo 'cd /grist' >> /startup.sh && \
-    echo 'exec /grist/sandbox/docker_entrypoint.sh "$@"' >> /startup.sh && \
-    chmod +x /startup.sh
-
-# Create user
-RUN useradd -ms /bin/bash grist
+# Create a simple start script that bypasses the complex entrypoint
+RUN echo '#!/bin/bash' > /start.sh && \
+    echo 'cd /grist' >> /start.sh && \
+    echo 'export PATH=/grist:$PATH' >> /start.sh && \
+    echo 'exec node /grist/sandbox/supervisor.mjs' >> /start.sh && \
+    chmod +x /start.sh
 
 WORKDIR /grist
 
@@ -134,11 +96,11 @@ ENV \
   NODE_OPTIONS="--no-deprecation --max-old-space-size=4096" \
   NODE_ENV=production \
   TYPEORM_DATABASE=/persist/home.sqlite3 \
-  PYTHON_BIN=/usr/bin/python3 \
-  PATH=/grist:$PATH
+  PYTHON_BIN=/usr/bin/python3
 
 EXPOSE 8484
 
-# Use absolute path
-ENTRYPOINT ["/startup.sh"]
-CMD ["node", "./sandbox/supervisor.mjs"]
+USER grist
+
+# Direct execution without the problematic entrypoint
+CMD ["node", "/grist/sandbox/supervisor.mjs"]
