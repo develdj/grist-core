@@ -11,11 +11,11 @@ RUN yarn install --frozen-lockfile --network-timeout 600000
 # Copy all source files
 COPY . /grist/
 
-# Build the production app and verify output
+# Build the production app
 RUN yarn run build:prod && \
-    echo "Build complete. Checking output:" && \
-    ls -la /grist/ && \
-    ls -la /grist/_build/ 2>/dev/null || true
+    echo "Build complete. Verifying build output..." && \
+    ls -la /grist/_build/app/server/ && \
+    test -f /grist/_build/app/server/mergedServerMain.js && echo "Main server file found!"
 
 FROM dustynv/cuda-python:r36.4.0-cu128-24.04
 
@@ -30,40 +30,24 @@ RUN apt-get update && \
         tini && \
     rm -rf /var/lib/apt/lists/*
 
-# Install minimal Python packages
+# Install Python packages
 RUN pip3 install --no-cache-dir --break-system-packages \
     six python-dateutil chardet sortedcontainers iso8601 openpyxl || true
 
-# Create directories
-RUN mkdir -p /persist/docs /grist
+# Create directory
+RUN mkdir -p /persist/docs
 
-# IMPORTANT: Copy ALL files from builder, not just /grist
-COPY --from=builder /grist/ /grist/
+# CRITICAL: Copy everything in one go to avoid layer issues
+COPY --from=builder /grist /grist
 
-# Verify files were copied
-RUN echo "Verifying copied files:" && \
-    ls -la /grist/ && \
-    test -d /grist/_build && echo "_build directory found" || echo "_build missing" && \
-    test -d /grist/node_modules && echo "node_modules found" || echo "node_modules missing"
+# Immediately verify and create entrypoint before any other operations
+RUN cd /grist && \
+    ls -la && \
+    test -d _build || (echo "ERROR: _build missing after copy!" && exit 1) && \
+    test -f _build/app/server/mergedServerMain.js || (echo "ERROR: Server file missing!" && exit 1) && \
+    echo "Files verified successfully!"
 
 WORKDIR /grist
-
-# Create startup script
-RUN echo '#!/bin/bash' > /start.sh && \
-    echo 'cd /grist' >> /start.sh && \
-    echo '' >> /start.sh && \
-    echo 'if [ -f "_build/app/server/mergedServerMain.js" ]; then' >> /start.sh && \
-    echo '  echo "Starting Grist server..."' >> /start.sh && \
-    echo '  exec node _build/app/server/mergedServerMain.js' >> /start.sh && \
-    echo 'else' >> /start.sh && \
-    echo '  echo "ERROR: Server file not found!"' >> /start.sh && \
-    echo '  echo "Contents of /grist:"' >> /start.sh && \
-    echo '  ls -la /grist/' >> /start.sh && \
-    echo '  echo "Contents of /grist/_build (if exists):"' >> /start.sh && \
-    echo '  ls -la /grist/_build/ 2>/dev/null || echo "No _build directory"' >> /start.sh && \
-    echo '  exit 1' >> /start.sh && \
-    echo 'fi' >> /start.sh && \
-    chmod +x /start.sh
 
 ENV GRIST_HOST=0.0.0.0 \
     GRIST_PORT=8484 \
@@ -76,4 +60,5 @@ ENV GRIST_HOST=0.0.0.0 \
 
 EXPOSE 8484
 
-CMD ["/start.sh"]
+# Direct execution - no script needed
+CMD ["node", "_build/app/server/mergedServerMain.js"]
