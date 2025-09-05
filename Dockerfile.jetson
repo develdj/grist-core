@@ -2,17 +2,14 @@ FROM node:22-bookworm AS builder
 
 WORKDIR /grist
 
-# Copy package files
-COPY package.json yarn.lock /grist/
-
-# Install dependencies
+# Copy and build
+COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile --network-timeout 600000
 
-# Copy all source files
-COPY . /grist/
-
-# Build the production app
-RUN yarn run build:prod
+COPY . .
+RUN yarn run build:prod && \
+    echo "Build complete. Files in _build:" && \
+    find _build -type f -name "*.js" | head -20
 
 FROM dustynv/cuda-python:r36.4.0-cu128-24.04
 
@@ -31,47 +28,33 @@ RUN apt-get update && \
 RUN pip3 install --no-cache-dir --break-system-packages \
     six python-dateutil chardet sortedcontainers iso8601 openpyxl || true
 
-# Create directory
-RUN mkdir -p /persist/docs
-
-# Copy everything from builder
-COPY --from=builder /grist /grist
-
-# Create dynamic startup script that finds the correct entry point
-RUN echo '#!/bin/bash' > /start.sh && \
-    echo 'cd /grist' >> /start.sh && \
-    echo '' >> /start.sh && \
-    echo '# Find and run the correct server file' >> /start.sh && \
-    echo 'if [ -f "_build/app/server/lib/main.js" ]; then' >> /start.sh && \
-    echo '  exec node _build/app/server/lib/main.js' >> /start.sh && \
-    echo 'elif [ -f "_build/app/server/MergedServer.js" ]; then' >> /start.sh && \
-    echo '  echo "Starting MergedServer.js..."' >> /start.sh && \
-    echo '  exec node _build/app/server/MergedServer.js' >> /start.sh && \
-    echo 'elif [ -f "_build/app/server/devServerMain.js" ]; then' >> /start.sh && \
-    echo '  echo "Starting devServerMain.js..."' >> /start.sh && \
-    echo '  exec node _build/app/server/devServerMain.js' >> /start.sh && \
-    echo 'else' >> /start.sh && \
-    echo '  echo "Looking for any main file in lib directory..."' >> /start.sh && \
-    echo '  if [ -d "_build/app/server/lib" ]; then' >> /start.sh && \
-    echo '    echo "Files in lib:"' >> /start.sh && \
-    echo '    ls -la _build/app/server/lib/' >> /start.sh && \
-    echo '    # Try to find and run any main-like file' >> /start.sh && \
-    echo '    for file in _build/app/server/lib/*Main*.js _build/app/server/lib/*main*.js _build/app/server/lib/app.js; do' >> /start.sh && \
-    echo '      if [ -f "$file" ]; then' >> /start.sh && \
-    echo '        echo "Starting $file..."' >> /start.sh && \
-    echo '        exec node "$file"' >> /start.sh && \
-    echo '      fi' >> /start.sh && \
-    echo '    done' >> /start.sh && \
-    echo '  fi' >> /start.sh && \
-    echo '  echo "ERROR: No server entry point found!"' >> /start.sh && \
-    echo '  echo "Directory contents:"' >> /start.sh && \
-    echo '  find _build/app/server -name "*.js" -type f | head -20' >> /start.sh && \
-    echo '  exit 1' >> /start.sh && \
-    echo 'fi' >> /start.sh && \
-    chmod +x /start.sh
+# Create directories
+RUN mkdir -p /persist/docs /grist
 
 WORKDIR /grist
 
+# Copy EVERYTHING explicitly
+COPY --from=builder /grist/package.json ./
+COPY --from=builder /grist/node_modules ./node_modules
+COPY --from=builder /grist/_build ./_build
+COPY --from=builder /grist/app ./app
+COPY --from=builder /grist/static ./static
+COPY --from=builder /grist/bower_components ./bower_components
+COPY --from=builder /grist/plugins ./plugins
+COPY --from=builder /grist/sandbox ./sandbox
+COPY --from=builder /grist/stubs ./stubs
+
+# Verify and create proper startup
+RUN echo "Checking copied files..." && \
+    ls -la /grist/ && \
+    if [ -d "_build" ]; then \
+        echo "_build exists, checking contents:"; \
+        find _build -name "*.js" -type f | head -10; \
+    else \
+        echo "_build MISSING!"; \
+    fi
+
+# Based on official Grist, the main entry is mergedServerMain.js
 ENV GRIST_HOST=0.0.0.0 \
     GRIST_PORT=8484 \
     GRIST_SINGLE_PORT=true \
@@ -83,4 +66,5 @@ ENV GRIST_HOST=0.0.0.0 \
 
 EXPOSE 8484
 
-CMD ["/start.sh"]
+# Try the standard Grist entry point
+CMD ["node", "_build/app/server/mergedServerMain.js"]
