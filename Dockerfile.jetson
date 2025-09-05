@@ -18,7 +18,7 @@ RUN apt-get update && \
     npm install -g yarn && \
     rm -rf /var/lib/apt/lists/*
 
-# Install ALL Python packages needed for Grist sandbox
+# Install ALL Python packages needed for Grist sandbox and formulas
 RUN pip3 install --index-url https://pypi.org/simple/ \
     --no-cache-dir --break-system-packages \
     six \
@@ -30,7 +30,12 @@ RUN pip3 install --index-url https://pypi.org/simple/ \
     asttokens \
     astroid \
     lazy_object_proxy \
-    wrapt
+    wrapt \
+    roman \
+    friendly_traceback \
+    phonenumbers \
+    babel \
+    pynumeral
 
 # Create user
 RUN useradd -ms /bin/bash grist && \
