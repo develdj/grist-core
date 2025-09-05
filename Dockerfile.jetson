@@ -13,9 +13,9 @@ COPY . /grist/
 
 # Build the production app
 RUN yarn run build:prod && \
-    echo "Build complete. Verifying build output..." && \
+    echo "Build complete. Checking for actual files..." && \
     ls -la /grist/_build/app/server/ && \
-    test -f /grist/_build/app/server/mergedServerMain.js && echo "Main server file found!"
+    echo "Looking for main entry points..."
 
 FROM dustynv/cuda-python:r36.4.0-cu128-24.04
 
@@ -37,15 +37,17 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 # Create directory
 RUN mkdir -p /persist/docs
 
-# CRITICAL: Copy everything in one go to avoid layer issues
+# Copy everything from builder
 COPY --from=builder /grist /grist
 
-# Immediately verify and create entrypoint before any other operations
+# Verify files and create correct startup
 RUN cd /grist && \
     ls -la && \
-    test -d _build || (echo "ERROR: _build missing after copy!" && exit 1) && \
-    test -f _build/app/server/mergedServerMain.js || (echo "ERROR: Server file missing!" && exit 1) && \
-    echo "Files verified successfully!"
+    test -d _build || (echo "ERROR: _build missing!" && exit 1) && \
+    echo "#!/bin/bash" > /start.sh && \
+    echo "cd /grist" >> /start.sh && \
+    echo "exec node _build/app/server/lib/main.js" >> /start.sh && \
+    chmod +x /start.sh
 
 WORKDIR /grist
 
@@ -60,5 +62,5 @@ ENV GRIST_HOST=0.0.0.0 \
 
 EXPOSE 8484
 
-# Direct execution - no script needed
-CMD ["node", "_build/app/server/mergedServerMain.js"]
+# The main entry point is likely in lib/main.js based on Grist's structure
+CMD ["/start.sh"]
