@@ -62,32 +62,21 @@ RUN apt-get update && \
         libsqlite3-0 \
         procps \
         tini \
-        build-essential && \
+        build-essential \
+        python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
 # Verify Node installation
 RUN node --version && npm --version
 
-# Configure pip to use Jetson PyPI repository
-RUN mkdir -p ~/.config/pip && \
-    echo "[global]" > ~/.config/pip/pip.conf && \
-    echo "extra-index-url = https://pypi.jetson-ai-lab.io/jp6/cu129" >> ~/.config/pip/pip.conf && \
-    echo "trusted-host = pypi.jetson-ai-lab.io" >> ~/.config/pip/pip.conf
-
-# Copy requirements
+# Update pip and install Python packages
 COPY sandbox/requirements.txt /tmp/requirements.txt
-
-# Install Python packages using Jetson-optimized repository
-RUN pip3 install --no-cache-dir --break-system-packages \
-    --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu129 \
-    -r /tmp/requirements.txt || \
-    (echo "Some packages failed to install, attempting individually..." && \
-     for package in $(cat /tmp/requirements.txt | grep -v '^#' | grep -v '^$'); do \
-        pip3 install --no-cache-dir --break-system-packages \
-            --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu129 \
-            "$package" || echo "Warning: Failed to install $package"; \
-     done) && \
-    rm /tmp/requirements.txt
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip config set global.extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu129 && \
+    python3 -m pip config set global.trusted-host pypi.jetson-ai-lab.io && \
+    (python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt || \
+     echo "Warning: Some Python packages may not have installed correctly") && \
+    rm -f /tmp/requirements.txt
 
 # Create persist directory
 RUN mkdir -p /persist/docs
@@ -100,12 +89,16 @@ COPY --from=builder /grist/static /grist/static-built
 COPY --from=builder /grist/app/cli.sh /grist/cli
 COPY --from=builder /grist/ext/asset[s] /grist/ext/assets
 
-# Add Grist files
+# Add ALL Grist files including sandbox directory
 COPY package.json /grist/package.json
 COPY bower_components /grist/bower_components
 COPY sandbox /grist/sandbox
 COPY plugins /grist/plugins
 COPY static /grist/static
+
+# Make sure the entrypoint script is executable
+RUN chmod +x /grist/sandbox/docker_entrypoint.sh && \
+    chmod +x /grist/sandbox/supervisor.mjs || true
 
 # Copy pyodide if built successfully
 COPY --from=builder /grist/sandbox/pyodide /grist/sandbox/pyodide
@@ -118,8 +111,9 @@ RUN \
 # Create grist user
 RUN useradd -ms /bin/bash grist
 
-# Set up Python path to use the optimized Python from the base image
-ENV PYTHON_BIN=/usr/bin/python3
+# Verify the entrypoint exists
+RUN ls -la /grist/sandbox/ && \
+    test -f /grist/sandbox/docker_entrypoint.sh || echo "WARNING: docker_entrypoint.sh not found!"
 
 WORKDIR /grist
 
@@ -137,11 +131,11 @@ ENV \
   NODE_OPTIONS="--no-deprecation --max-old-space-size=4096" \
   NODE_ENV=production \
   TYPEORM_DATABASE=/persist/home.sqlite3 \
-  PYTHONPATH=/usr/local/lib/python3.10/dist-packages:$PYTHONPATH \
-  PIP_EXTRA_INDEX_URL=https://pypi.jetson-ai-lab.io/jp6/cu129
+  PYTHON_BIN=/usr/bin/python3
 
 # Expose port
 EXPOSE 8484
 
-ENTRYPOINT ["./sandbox/docker_entrypoint.sh"]
+# Use absolute path for entrypoint
+ENTRYPOINT ["/grist/sandbox/docker_entrypoint.sh"]
 CMD ["node", "./sandbox/supervisor.mjs"]
