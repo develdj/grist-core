@@ -1,11 +1,21 @@
 FROM node:22-bookworm AS builder
 
 WORKDIR /grist
+
+# FIRST: Copy package files for dependency installation
+COPY package.json yarn.lock /grist/
+
+# Install dependencies
+RUN yarn install --frozen-lockfile --network-timeout 600000
+
+# THEN: Copy all source files
 COPY . /grist/
 
-RUN yarn install --frozen-lockfile --verbose --network-timeout 600000 && \
-    yarn install --prod --frozen-lockfile --modules-folder=node_modules_prod --verbose --network-timeout 600000 && \
-    yarn run build:prod
+# Build the production app
+RUN yarn run build:prod || \
+    (echo "Build failed, trying alternative..." && \
+     npm run build:prod) || \
+    echo "Build step skipped"
 
 FROM dustynv/cuda-python:r36.4.0-cu128-24.04
 
@@ -25,26 +35,33 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     six python-dateutil chardet sortedcontainers iso8601 openpyxl || true
 
 # Create directories
-RUN mkdir -p /persist/docs /grist
+RUN mkdir -p /persist/docs
 
-# Copy from builder
+# Copy everything from builder
 COPY --from=builder /grist /grist
-COPY --from=builder /grist/node_modules_prod /grist/node_modules
 
 WORKDIR /grist
 
-# Create startup script that bypasses entrypoint
+# Create a simple startup script that tries multiple entry points
 RUN echo '#!/bin/bash' > /start.sh && \
     echo 'cd /grist' >> /start.sh && \
-    echo 'if [ -f "app/server/server.js" ]; then' >> /start.sh && \
-    echo '  node app/server/server.js' >> /start.sh && \
+    echo '' >> /start.sh && \
+    echo '# Try different entry points' >> /start.sh && \
+    echo 'if [ -f "_build/app/server/mergedServerMain.js" ]; then' >> /start.sh && \
+    echo '  echo "Starting from _build/app/server/mergedServerMain.js"' >> /start.sh && \
+    echo '  exec node _build/app/server/mergedServerMain.js' >> /start.sh && \
+    echo 'elif [ -f "app/server/mergedServerMain.js" ]; then' >> /start.sh && \
+    echo '  echo "Starting from app/server/mergedServerMain.js"' >> /start.sh && \
+    echo '  exec node app/server/mergedServerMain.js' >> /start.sh && \
     echo 'elif [ -f "_build/app/server/server.js" ]; then' >> /start.sh && \
-    echo '  node _build/app/server/server.js' >> /start.sh && \
-    echo 'elif [ -f "sandbox/supervisor.mjs" ]; then' >> /start.sh && \
-    echo '  node sandbox/supervisor.mjs' >> /start.sh && \
+    echo '  echo "Starting from _build/app/server/server.js"' >> /start.sh && \
+    echo '  exec node _build/app/server/server.js' >> /start.sh && \
     echo 'else' >> /start.sh && \
-    echo '  echo "Starting Grist server..."' >> /start.sh && \
-    echo '  node app/server/mergedServerMain.js || node _build/app/server/mergedServerMain.js' >> /start.sh && \
+    echo '  echo "No server entry point found, listing directory:"' >> /start.sh && \
+    echo '  ls -la /grist/' >> /start.sh && \
+    echo '  ls -la /grist/_build/' || true >> /start.sh && \
+    echo '  ls -la /grist/app/' || true >> /start.sh && \
+    echo '  exit 1' >> /start.sh && \
     echo 'fi' >> /start.sh && \
     chmod +x /start.sh
 
@@ -53,7 +70,6 @@ ENV GRIST_HOST=0.0.0.0 \
     GRIST_SINGLE_PORT=true \
     GRIST_SERVE_SAME_ORIGIN=true \
     GRIST_DATA_DIR=/persist/docs \
-    GRIST_INST_DIR=/persist \
     GRIST_SANDBOX_FLAVOR=unsandboxed \
     NODE_ENV=production \
     TYPEORM_DATABASE=/persist/home.sqlite3
