@@ -68,27 +68,25 @@ RUN apt-get update && \
 # Verify Node installation
 RUN node --version && npm --version
 
-# Install Python packages for Grist
-# First, check what Python and pip are available
-RUN python3 --version && \
-    (pip3 --version || pip --version || python3 -m pip --version)
+# Configure pip to use Jetson PyPI repository
+RUN mkdir -p ~/.config/pip && \
+    echo "[global]" > ~/.config/pip/pip.conf && \
+    echo "extra-index-url = https://pypi.jetson-ai-lab.io/jp6/cu129" >> ~/.config/pip/pip.conf && \
+    echo "trusted-host = pypi.jetson-ai-lab.io" >> ~/.config/pip/pip.conf
 
-# Copy requirements and install with better error handling
+# Copy requirements
 COPY sandbox/requirements.txt /tmp/requirements.txt
 
-# Install Python packages with fallback options
-RUN set -e; \
-    if command -v pip3 >/dev/null 2>&1; then \
-        pip3 install --no-cache-dir -r /tmp/requirements.txt || \
-        pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt || \
-        python3 -m pip install --no-cache-dir -r /tmp/requirements.txt; \
-    elif command -v pip >/dev/null 2>&1; then \
-        pip install --no-cache-dir -r /tmp/requirements.txt || \
-        pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt; \
-    else \
-        python3 -m pip install --no-cache-dir -r /tmp/requirements.txt || \
-        python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt; \
-    fi; \
+# Install Python packages using Jetson-optimized repository
+RUN pip3 install --no-cache-dir --break-system-packages \
+    --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu129 \
+    -r /tmp/requirements.txt || \
+    (echo "Some packages failed to install, attempting individually..." && \
+     for package in $(cat /tmp/requirements.txt | grep -v '^#' | grep -v '^$'); do \
+        pip3 install --no-cache-dir --break-system-packages \
+            --extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu129 \
+            "$package" || echo "Warning: Failed to install $package"; \
+     done) && \
     rm /tmp/requirements.txt
 
 # Create persist directory
@@ -139,7 +137,8 @@ ENV \
   NODE_OPTIONS="--no-deprecation --max-old-space-size=4096" \
   NODE_ENV=production \
   TYPEORM_DATABASE=/persist/home.sqlite3 \
-  PYTHONPATH=/usr/local/lib/python3.10/dist-packages:$PYTHONPATH
+  PYTHONPATH=/usr/local/lib/python3.10/dist-packages:$PYTHONPATH \
+  PIP_EXTRA_INDEX_URL=https://pypi.jetson-ai-lab.io/jp6/cu129
 
 # Expose port
 EXPOSE 8484
