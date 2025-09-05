@@ -1,4 +1,5 @@
 version: '3.8'
+
 services:
   grist:
     build:
@@ -8,21 +9,50 @@ services:
         - linux/arm64
     image: grist-jetson:latest
     runtime: nvidia
+    container_name: grist-server
     volumes:
       - ${PERSIST_DIR:-./persist}/grist:/persist
-    ports:
-      - 8484:8484
     environment:
       - GRIST_DEFAULT_EMAIL=${GRIST_DEFAULT_EMAIL:-admin@example.com}
       - GRIST_SINGLE_ORG=${GRIST_SINGLE_ORG:-docs}
       - CUDA_VISIBLE_DEVICES=0
       - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - GRIST_HOST=0.0.0.0
+      - GRIST_PORT=8484
+    networks:
+      - grist-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8484/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grist-static:
+    build:
+      context: .
+      dockerfile: Dockerfile.static
+      platforms:
+        - linux/arm64
+    image: grist-static:latest
+    container_name: grist-static
+    ports:
+      - "80:80"      # Public web interface
+      - "8484:8484"  # Grist API access (if needed externally)
+    depends_on:
+      - grist
+    networks:
+      - grist-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   persist:
     driver: local
-
 
 networks:
   grist-network:
