@@ -1,28 +1,23 @@
-# Builder stage with all necessary tools
+# Builder stage
 FROM node:22-bullseye as builder
 
-# Install build dependencies
 RUN apt-get update && \
-    apt-get install -y \
-        build-essential \
-        python3 \
-        make \
-        g++ && \
+    apt-get install -y build-essential python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /grist
 COPY . /grist
 
-# Install with all dependencies first, then production deps separately
 RUN yarn install --frozen-lockfile --network-timeout 600000 && \
     yarn run build:prod && \
-    rm -rf node_modules && \
-    yarn install --production --frozen-lockfile --network-timeout 600000
+    echo "=== Build complete, checking files ===" && \
+    ls -la /grist/_build/app/server/ && \
+    test -f /grist/_build/app/server/mergedServerMain.js || \
+    (echo "ERROR: mergedServerMain.js not found!" && find /grist/_build -name "*.js" | head -20 && exit 1)
 
-# Jetson runtime with CUDA support
+# Jetson runtime 
 FROM dustynv/cuda-python:r36.4.0-cu128-24.04
 
-# Install runtime dependencies
 RUN apt-get update && \
     apt-get install -y \
         curl \
@@ -33,26 +28,28 @@ RUN apt-get update && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python packages using standard PyPI
 RUN pip3 install --index-url https://pypi.org/simple/ \
     --no-cache-dir --break-system-packages \
     six python-dateutil chardet sortedcontainers iso8601 openpyxl || true
 
-# Add grist user
 RUN useradd -ms /bin/bash grist && \
     mkdir -p /persist/docs && \
     chown -R grist:grist /persist
 
-# Copy built application from builder
 WORKDIR /grist
-COPY --from=builder --chown=grist:grist /grist/package.json /grist/package.json
-COPY --from=builder --chown=grist:grist /grist/node_modules /grist/node_modules
-COPY --from=builder --chown=grist:grist /grist/_build /grist/_build
-COPY --from=builder --chown=grist:grist /grist/static /grist/static
-COPY --from=builder --chown=grist:grist /grist/bower_components /grist/bower_components
-COPY --from=builder --chown=grist:grist /grist/sandbox /grist/sandbox
-COPY --from=builder --chown=grist:grist /grist/plugins /grist/plugins
-COPY --from=builder --chown=grist:grist /grist/stubs /grist/stubs
+
+# Copy everything and verify
+COPY --from=builder /grist /grist
+
+# Verify files were copied
+RUN echo "Checking copied files..." && \
+    ls -la /grist/ && \
+    ls -la /grist/_build/app/server/ && \
+    test -f /grist/_build/app/server/mergedServerMain.js || \
+    (echo "ERROR: Files not copied properly!" && exit 1)
+
+# Change ownership after verification
+RUN chown -R grist:grist /grist
 
 USER grist
 
