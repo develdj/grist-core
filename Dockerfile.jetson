@@ -33,47 +33,31 @@ COPY . /app
 
 RUN yarn install --frozen-lockfile --network-timeout 600000 && \
     yarn run build:prod && \
-    echo "=== Build complete ===" && \
-    ls -la /app/_build/app/server/ && \
     chown -R grist:grist /app
 
-# Create comprehensive startup script
+# Create proper startup script with NODE_PATH
 RUN cat > /start.sh << 'EOF'
 #!/bin/bash
-echo "Starting Grist server..."
-echo "Working directory: $(pwd)"
-echo "Checking /app contents:"
-ls -la /app/ | head -20
-echo "Checking /app/_build:"
-if [ -d /app/_build ]; then
-    echo "_build exists"
-    ls -la /app/_build/app/server/ 2>/dev/null || echo "No server directory"
-else
-    echo "_build MISSING!"
-fi
-
 cd /app
 
-# Try different possible entry points
-if [ -f "_build/app/server/devServerMain.js" ]; then
-    echo "Starting devServerMain.js..."
-    exec node _build/app/server/devServerMain.js
-elif [ -f "_build/app/server/MergedServer.js" ]; then
-    echo "Starting MergedServer.js..."
-    exec node _build/app/server/MergedServer.js
-elif [ -f "sandbox/grist/main.py" ]; then
-    echo "Trying Python entry point..."
-    exec python3 sandbox/grist/main.py
+# Set NODE_PATH to help resolve modules
+export NODE_PATH=/app/_build:/app/node_modules:$NODE_PATH
+
+# Use the main entry point from package.json
+if [ -f "_build/app/server/lib/main.js" ]; then
+    echo "Starting with main.js..."
+    exec node _build/app/server/lib/main.js
+elif [ -f "sandbox/gristServer.js" ]; then
+    echo "Starting with gristServer.js..."
+    exec node sandbox/gristServer.js
 else
-    echo "ERROR: No entry point found!"
-    echo "Available JS files:"
-    find /app -name "*.js" -type f | grep -E "(main|server|start)" | head -20
-    # Keep container alive for debugging
-    tail -f /dev/null
+    # Fall back to running the npm start command
+    echo "Starting with yarn start..."
+    exec yarn start
 fi
 EOF
 
-RUN chmod +x /start.sh && chown grist:grist /start.sh
+RUN chmod +x /start.sh
 
 USER grist
 
@@ -82,7 +66,8 @@ ENV GRIST_HOST=0.0.0.0 \
     GRIST_DATA_DIR=/persist/docs \
     GRIST_SANDBOX_FLAVOR=unsandboxed \
     NODE_ENV=production \
-    HOME=/home/grist
+    HOME=/home/grist \
+    NODE_PATH=/app/_build:/app/node_modules
 
 EXPOSE 8484
 
