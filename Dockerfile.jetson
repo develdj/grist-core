@@ -6,7 +6,130 @@ FROM scratch AS ext
 ################################################################################
 ## Javascript build stage
 ################################################################################
+FROM node:22-bookworm AS builder################################################################################
+## Jetson Orin AGX Optimized Grist Dockerfile with CUDA support
+################################################################################
+FROM scratch AS ext
+
+################################################################################
+## Javascript build stage
+################################################################################
 FROM node:22-bookworm AS builder
+
+WORKDIR /grist
+
+# Copy all source files FIRST
+COPY . /grist/
+
+# Verify critical files exist
+RUN ls -la /grist/sandbox/ && \
+    test -f /grist/sandbox/supervisor.mjs || (echo "ERROR: supervisor.mjs missing!" && exit 1)
+
+# Install dependencies
+RUN yarn install --frozen-lockfile --verbose --network-timeout 600000 && \
+    yarn global add --verbose --network-timeout 600000 node-gyp node-pre-gyp node-gyp-build node-gyp-build-optional-packages && \
+    yarn install --prod --frozen-lockfile --modules-folder=node_modules_prod --verbose --network-timeout 600000
+
+# Build if ext exists
+RUN mkdir -p /node_modules && \
+    if [ -d /grist/ext ] && [ -f /grist/ext/package.json ]; then \
+      cd /grist/ext && \
+      yarn install --frozen-lockfile --modules-folder=/node_modules --verbose --network-timeout 600000; \
+    fi
+
+# Build node code
+RUN cd /grist && WEBPACK_EXTRA_MODULE_PATHS=/node_modules yarn run build:prod
+
+# Setup pyodide
+RUN cd /grist/sandbox/pyodide && make setup || echo "Pyodide setup skipped for ARM64"
+
+################################################################################
+## Run-time stage - Using Jetson-optimized base image
+################################################################################
+FROM dustynv/cuda-python:r36.4.0-cu128-24.04
+
+ARG GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING=false
+
+# Install Node.js and required packages
+RUN apt-get update && \
+    apt-get install -y ca-certificates curl gnupg && \
+    mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && \
+    apt-get install -y \
+        nodejs \
+        libexpat1 \
+        libsqlite3-0 \
+        procps \
+        tini \
+        build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python packages from standard PyPI
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --no-cache-dir --break-system-packages \
+        six \
+        python-dateutil \
+        chardet \
+        sortedcontainers \
+        iso8601 \
+        openpyxl \
+        phonenumberslite \
+        astroid \
+        asttokens \
+        et-xmlfile \
+        executing \
+        friendly-traceback \
+        lazy-object-proxy \
+        pure-eval \
+        roman \
+        stack-data \
+        typing-extensions \
+        unittest-xml-reporting \
+        wrapt || \
+    echo "Warning: Some Python packages not installed"
+
+# Create directory structure
+RUN mkdir -p /persist/docs /grist
+
+# Copy everything from builder INCLUDING verification
+COPY --from=builder /grist /grist
+COPY --from=builder /node_modules /node_modules
+
+# CRITICAL: Verify the files exist
+RUN echo "Checking for critical files..." && \
+    ls -la /grist/ && \
+    ls -la /grist/sandbox/ && \
+    test -f /grist/sandbox/supervisor.mjs && echo "supervisor.mjs found!" || (echo "ERROR: supervisor.mjs missing!" && exit 1)
+
+# Create grist user and set permissions
+RUN useradd -ms /bin/bash grist && \
+    chown -R grist:grist /persist
+
+WORKDIR /grist
+
+# Environment variables
+ENV \
+  GRIST_ORG_IN_PATH=true \
+  GRIST_HOST=0.0.0.0 \
+  GRIST_SINGLE_PORT=true \
+  GRIST_SERVE_SAME_ORIGIN=true \
+  GRIST_DATA_DIR=/persist/docs \
+  GRIST_INST_DIR=/persist \
+  GRIST_SESSION_COOKIE=grist_core \
+  GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING=${GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING} \
+  GRIST_SANDBOX_FLAVOR=unsandboxed \
+  NODE_OPTIONS="--no-deprecation --max-old-space-size=4096" \
+  NODE_ENV=production \
+  TYPEORM_DATABASE=/persist/home.sqlite3 \
+  PYTHON_BIN=/usr/bin/python3 \
+  PATH=/grist:/grist/sandbox:$PATH
+
+EXPOSE 8484
+
+# Use the actual command from the original Grist Dockerfile
+CMD ["node", "sandbox/supervisor.mjs"]
 
 WORKDIR /grist
 COPY package.json yarn.lock /grist/
