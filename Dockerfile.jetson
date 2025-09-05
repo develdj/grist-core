@@ -55,10 +55,15 @@ RUN apt-get update && \
         build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# Install minimal Python packages
-RUN python3 -m pip install --upgrade pip && \
-    python3 -m pip install --no-cache-dir --break-system-packages \
-        six python-dateutil chardet sortedcontainers iso8601 2>/dev/null || \
+# Install Python packages from standard PyPI only
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+        six \
+        python-dateutil \
+        chardet \
+        sortedcontainers \
+        iso8601 \
+        openpyxl \
+        phonenumberslite || \
     echo "Warning: Some Python packages not installed"
 
 # Create directory structure
@@ -68,17 +73,9 @@ RUN mkdir -p /persist/docs /grist
 COPY --from=builder /grist /grist
 COPY --from=builder /node_modules /node_modules
 
-# Create grist user and set permissions
+# Create grist user but don't switch to it yet
 RUN useradd -ms /bin/bash grist && \
-    chown -R grist:grist /persist && \
-    chown -R grist:grist /grist
-
-# Create a simple start script that bypasses the complex entrypoint
-RUN echo '#!/bin/bash' > /start.sh && \
-    echo 'cd /grist' >> /start.sh && \
-    echo 'export PATH=/grist:$PATH' >> /start.sh && \
-    echo 'exec node /grist/sandbox/supervisor.mjs' >> /start.sh && \
-    chmod +x /start.sh
+    chown -R grist:grist /persist
 
 WORKDIR /grist
 
@@ -100,7 +97,5 @@ ENV \
 
 EXPOSE 8484
 
-USER grist
-
-# Direct execution without the problematic entrypoint
+# Run as root for now (we can add proper user handling later)
 CMD ["node", "/grist/sandbox/supervisor.mjs"]
