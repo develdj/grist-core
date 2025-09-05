@@ -22,31 +22,33 @@ RUN mkdir -p /persist/docs /grist
 
 WORKDIR /grist
 
-# Copy and build in place
+# Copy and build
 COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile --network-timeout 600000
 
 COPY . .
-RUN yarn run build:prod && \
-    echo "Build complete. Checking files..." && \
-    ls -la _build/app/server/ && \
-    find _build/app/server -name "*.js" -type f | head -10
 
-# Create a startup script that finds the right entry point
+# Build and immediately check what's created
+RUN yarn run build:prod && \
+    echo "=== BUILD COMPLETE ===" && \
+    echo "Contents of /grist:" && \
+    ls -la /grist/ && \
+    echo "Looking for _build directory:" && \
+    find /grist -type d -name "_build" 2>/dev/null | head -5 && \
+    echo "Looking for any .js files with 'server' in path:" && \
+    find /grist -path "*server*.js" -type f 2>/dev/null | head -20 && \
+    echo "Checking if running 'yarn start' works:" && \
+    timeout 5 yarn start || echo "Start command output above"
+
+# Create debug startup
 RUN echo '#!/bin/bash' > /start.sh && \
-    echo 'cd /grist' >> /start.sh && \
-    echo 'if [ -f "_build/app/server/mergedServerMain.js" ]; then' >> /start.sh && \
-    echo '  exec node _build/app/server/mergedServerMain.js' >> /start.sh && \
-    echo 'elif [ -f "_build/app/server/MergedServer.js" ]; then' >> /start.sh && \
-    echo '  exec node _build/app/server/MergedServer.js' >> /start.sh && \
-    echo 'elif [ -f "_build/app/server/devServerMain.js" ]; then' >> /start.sh && \
-    echo '  exec node _build/app/server/devServerMain.js' >> /start.sh && \
-    echo 'else' >> /start.sh && \
-    echo '  echo "Available JS files in _build/app/server:"' >> /start.sh && \
-    echo '  ls -la _build/app/server/*.js 2>/dev/null || echo "No JS files found"' >> /start.sh && \
-    echo '  echo "Starting first available main file..."' >> /start.sh && \
-    echo '  exec node _build/app/server/$(ls _build/app/server/*.js | head -1)' >> /start.sh && \
-    echo 'fi' >> /start.sh && \
+    echo 'echo "Current directory: $(pwd)"' >> /start.sh && \
+    echo 'echo "Contents of /grist:"' >> /start.sh && \
+    echo 'ls -la /grist/' >> /start.sh && \
+    echo 'echo "Looking for server files:"' >> /start.sh && \
+    echo 'find /grist -name "*server*.js" -type f 2>/dev/null | head -10' >> /start.sh && \
+    echo 'echo "Trying yarn start:"' >> /start.sh && \
+    echo 'cd /grist && exec yarn start' >> /start.sh && \
     chmod +x /start.sh
 
 ENV GRIST_HOST=0.0.0.0 \
