@@ -13,7 +13,7 @@ services:
     volumes:
       - ${PERSIST_DIR:-./persist}/grist:/persist
     ports:
-      - "8484:8484"  # Expose Grist directly
+      - "8484:8484"
     environment:
       - GRIST_DEFAULT_EMAIL=${GRIST_DEFAULT_EMAIL:-admin@example.com}
       - GRIST_SINGLE_ORG=${GRIST_SINGLE_ORG:-docs}
@@ -21,6 +21,22 @@ services:
       - TF_FORCE_GPU_ALLOW_GROWTH=true
       - GRIST_HOST=0.0.0.0
       - GRIST_PORT=8484
+    networks:
+      - grist-network
+    restart: unless-stopped
+
+  grist-static:
+    build:
+      context: .
+      dockerfile: Dockerfile.static
+      platforms:
+        - linux/arm64
+    image: grist-static:latest
+    container_name: grist-static
+    ports:
+      - "8085:80"     # Changed to port 8085
+    depends_on:
+      - grist
     networks:
       - grist-network
     restart: unless-stopped
