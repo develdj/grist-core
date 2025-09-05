@@ -1,27 +1,16 @@
-FROM node:22-bookworm AS builder
-
-WORKDIR /grist
-
-# Copy and build
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile --network-timeout 600000
-
-COPY . .
-RUN yarn run build:prod && \
-    echo "Build complete. Files in _build:" && \
-    find _build -type f -name "*.js" | head -20
-
 FROM dustynv/cuda-python:r36.4.0-cu128-24.04
 
-# Install Node.js
+# Install Node.js and build tools
 RUN apt-get update && \
-    apt-get install -y ca-certificates curl gnupg && \
+    apt-get install -y ca-certificates curl gnupg git && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs \
         libexpat1 \
         libsqlite3-0 \
         procps \
-        tini && \
+        tini \
+        build-essential && \
+    npm install -g yarn && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
@@ -33,28 +22,33 @@ RUN mkdir -p /persist/docs /grist
 
 WORKDIR /grist
 
-# Copy EVERYTHING explicitly
-COPY --from=builder /grist/package.json ./
-COPY --from=builder /grist/node_modules ./node_modules
-COPY --from=builder /grist/_build ./_build
-COPY --from=builder /grist/app ./app
-COPY --from=builder /grist/static ./static
-COPY --from=builder /grist/bower_components ./bower_components
-COPY --from=builder /grist/plugins ./plugins
-COPY --from=builder /grist/sandbox ./sandbox
-COPY --from=builder /grist/stubs ./stubs
+# Copy and build in place
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile --network-timeout 600000
 
-# Verify and create proper startup
-RUN echo "Checking copied files..." && \
-    ls -la /grist/ && \
-    if [ -d "_build" ]; then \
-        echo "_build exists, checking contents:"; \
-        find _build -name "*.js" -type f | head -10; \
-    else \
-        echo "_build MISSING!"; \
-    fi
+COPY . .
+RUN yarn run build:prod && \
+    echo "Build complete. Checking files..." && \
+    ls -la _build/app/server/ && \
+    find _build/app/server -name "*.js" -type f | head -10
 
-# Based on official Grist, the main entry is mergedServerMain.js
+# Create a startup script that finds the right entry point
+RUN echo '#!/bin/bash' > /start.sh && \
+    echo 'cd /grist' >> /start.sh && \
+    echo 'if [ -f "_build/app/server/mergedServerMain.js" ]; then' >> /start.sh && \
+    echo '  exec node _build/app/server/mergedServerMain.js' >> /start.sh && \
+    echo 'elif [ -f "_build/app/server/MergedServer.js" ]; then' >> /start.sh && \
+    echo '  exec node _build/app/server/MergedServer.js' >> /start.sh && \
+    echo 'elif [ -f "_build/app/server/devServerMain.js" ]; then' >> /start.sh && \
+    echo '  exec node _build/app/server/devServerMain.js' >> /start.sh && \
+    echo 'else' >> /start.sh && \
+    echo '  echo "Available JS files in _build/app/server:"' >> /start.sh && \
+    echo '  ls -la _build/app/server/*.js 2>/dev/null || echo "No JS files found"' >> /start.sh && \
+    echo '  echo "Starting first available main file..."' >> /start.sh && \
+    echo '  exec node _build/app/server/$(ls _build/app/server/*.js | head -1)' >> /start.sh && \
+    echo 'fi' >> /start.sh && \
+    chmod +x /start.sh
+
 ENV GRIST_HOST=0.0.0.0 \
     GRIST_PORT=8484 \
     GRIST_SINGLE_PORT=true \
@@ -66,5 +60,4 @@ ENV GRIST_HOST=0.0.0.0 \
 
 EXPOSE 8484
 
-# Try the standard Grist entry point
-CMD ["node", "_build/app/server/mergedServerMain.js"]
+CMD ["/start.sh"]
